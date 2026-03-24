@@ -120,3 +120,25 @@ define amdgpu_ps float @or3_vgpr_const(i32 %a, i32 %b) {
   %bc = bitcast i32 %result to float
   ret float %bc
 }
+
+define <2 x i32> @or3_v2i32(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c) {
+; VI-LABEL: or3_v2i32:
+; VI:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; VI-DAG:    v_or_b32_e32 v0, v0, v2
+; VI-DAG:    v_or_b32_e32 v1, v1, v3
+; VI-DAG:    v_or_b32_e32 v0, v0, v4
+; VI-DAG:    v_or_b32_e32 v1, v1, v5
+;
+; GFX9-LABEL: or3_v2i32:
+; GFX9:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-DAG:     v_or3_b32 v0, v0, v2, v4
+; GFX9-DAG:     v_or3_b32 v1, v1, v3, v5
+;
+; GFX10-LABEL: or3_v2i32:
+; GFX10:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-DAG:     v_or3_b32 v0, v0, v2, v4
+; GFX10-DAG:     v_or3_b32 v1, v1, v3, v5
+  %x = or <2 x i32> %a, %b
+  %result = or <2 x i32> %x, %c
+  ret <2 x i32> %result
+}
