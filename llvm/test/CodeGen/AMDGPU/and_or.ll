@@ -216,6 +216,26 @@ define <2 x i32> @and_or_v2i32_ab(<2 x i32> %a, <2 x i32> %b, <2 x i32> inreg %c
   ret <2 x i32> %result
 }
 
+define <2 x i32> @and_or_v2i32_abc(<2 x i32> inreg %a, <2 x i32> inreg %b, <2 x i32> inreg %c) {
+; VI-LABEL: and_or_v2i32_abc:
+; VI:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; VI-NEXT:    s_and_b64 s[4:5], s[16:17], s[18:19]
+; VI-NEXT:    s_or_b64 s[4:5], s[4:5], s[20:21]
+;
+; GFX9-LABEL: and_or_v2i32_abc:
+; GFX9:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    s_and_b64 s[4:5], s[16:17], s[18:19]
+; GFX9-NEXT:    s_or_b64 s[4:5], s[4:5], s[20:21]
+;
+; GFX10-LABEL: and_or_v2i32_abc:
+; GFX10:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    s_and_b64 [[SV0:s\[[0-9]+:[0-9]+\]]], [[SV1:s\[[0-9]+:[0-9]+\]]], [[SV2:s\[[0-9]+:[0-9]+\]]]
+; GFX10-NEXT:    s_or_b64 [[SV0]], [[SV0]], [[SV3:s\[[0-9]+:[0-9]+\]]]
+  %x = and <2 x i32> %a, %b
+  %result = or <2 x i32> %x, %c
+  ret <2 x i32> %result
+}
+
 define <2 x i32> @and_or_v2i32_const(<2 x i32> %a, <2 x i32> %b) {
 ; VI-LABEL: and_or_v2i32_const:
 ; VI:        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
