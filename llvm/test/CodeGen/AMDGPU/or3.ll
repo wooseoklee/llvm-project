@@ -121,76 +121,205 @@ define amdgpu_ps float @or3_vgpr_const(i32 %a, i32 %b) {
   ret float %bc
 }
 
-define <2 x i32> @or3_v2i32(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c) {
-; VI-LABEL: or3_v2i32:
-; VI:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; VI-DAG:    v_or_b32_e32 v0, v0, v2
-; VI-DAG:    v_or_b32_e32 v1, v1, v3
-; VI-CHECK-NOT: {{.}}
-; VI-DAG:    v_or_b32_e32 v0, v0, v4
-; VI-DAG:    v_or_b32_e32 v1, v1, v5
+define amdgpu_ps <2 x i32> @v_or3_v2i32(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c) {
+; VI-LABEL: v_or3_v2i32:
+; VI:       ; %bb.0:
+; VI-NEXT:    v_or_b32_e32 v1, v1, v3
+; VI-NEXT:    v_or_b32_e32 v0, v0, v2
+; VI-NEXT:    v_or_b32_e32 v1, v1, v5
+; VI-NEXT:    v_or_b32_e32 v0, v0, v4
+; VI-NEXT:    v_readfirstlane_b32 s0, v0
+; VI-NEXT:    v_readfirstlane_b32 s1, v1
+; VI-NEXT:    ; return to shader part epilog
 ;
-; GFX9-LABEL: or3_v2i32:
-; GFX9:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX9-DAG:     v_or3_b32 v0, v0, v2, v4
-; GFX9-DAG:     v_or3_b32 v1, v1, v3, v5
+; GFX9-LABEL: v_or3_v2i32:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    v_or3_b32 v1, v1, v3, v5
+; GFX9-NEXT:    v_or3_b32 v0, v0, v2, v4
+; GFX9-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX9-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX9-NEXT:    ; return to shader part epilog
 ;
-; GFX10-LABEL: or3_v2i32:
-; GFX10:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX10-DAG:     v_or3_b32 v0, v0, v2, v4
-; GFX10-DAG:     v_or3_b32 v1, v1, v3, v5
+; GFX10-LABEL: v_or3_v2i32:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    v_or3_b32 v0, v0, v2, v4
+; GFX10-NEXT:    v_or3_b32 v1, v1, v3, v5
+; GFX10-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX10-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX10-NEXT:    ; return to shader part epilog
   %x = or <2 x i32> %a, %b
   %result = or <2 x i32> %x, %c
   ret <2 x i32> %result
 }
 
 ; ThreeOp instruction variant not used due to Constant Bus Limitations
-define <2 x i32> @or3_v2i32_b(<2 x i32> inreg %a, <2 x i32> %b, <2 x i32> inreg %c) {
-; VI-LABEL: or3_v2i32_b:
-; VI:        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; VI-DAG:    v_or_b32_e32 v0, s16, v0
-; VI-DAG:    v_or_b32_e32 v1, s17, v1
-; VI-CHECK-NOT: {{.}}
-; VI-DAG:    v_or_b32_e32 v0, s18, v0
-; VI-DAG:    v_or_b32_e32 v1, s19, v1
+define amdgpu_ps <2 x i32> @v_or3_v2i32_b(<2 x i32> inreg %a, <2 x i32> %b, <2 x i32> inreg %c) {
+; VI-LABEL: v_or3_v2i32_b:
+; VI:       ; %bb.0:
+; VI-NEXT:    v_or_b32_e32 v1, s3, v1
+; VI-NEXT:    v_or_b32_e32 v0, s2, v0
+; VI-NEXT:    v_or_b32_e32 v1, s5, v1
+; VI-NEXT:    v_or_b32_e32 v0, s4, v0
+; VI-NEXT:    v_readfirstlane_b32 s0, v0
+; VI-NEXT:    v_readfirstlane_b32 s1, v1
+; VI-NEXT:    ; return to shader part epilog
 ;
-; GFX9-LABEL: or3_v2i32_b:
-; GFX9:        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX9-DAG:    v_or_b32_e32 v0, s16, v0
-; GFX9-DAG:    v_or_b32_e32 v1, s17, v1
-; GFX9-CHECK-NOT: {{.}}
-; GFX9-DAG:    v_or_b32_e32 v0, s18, v0
-; GFX9-DAG:    v_or_b32_e32 v1, s19, v1
+; GFX9-LABEL: v_or3_v2i32_b:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    v_or_b32_e32 v1, s3, v1
+; GFX9-NEXT:    v_or_b32_e32 v0, s2, v0
+; GFX9-NEXT:    v_or_b32_e32 v1, s5, v1
+; GFX9-NEXT:    v_or_b32_e32 v0, s4, v0
+; GFX9-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX9-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX9-NEXT:    ; return to shader part epilog
 ;
-; GFX10-LABEL: or3_v2i32_b:
-; GFX10:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX10-DAG:     v_or3_b32 v0, s{{[0-9]+}}, v0, s{{[0-9]+}}
-; GFX10-DAG:     v_or3_b32 v1, s{{[0-9]+}}, v1, s{{[0-9]+}}
+; GFX10-LABEL: v_or3_v2i32_b:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    v_or3_b32 v0, s2, v0, s4
+; GFX10-NEXT:    v_or3_b32 v1, s3, v1, s5
+; GFX10-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX10-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX10-NEXT:    ; return to shader part epilog
   %x = or <2 x i32> %a, %b
   %result = or <2 x i32> %x, %c
   ret <2 x i32> %result
 }
 
-define <2 x i32> @or3_v2i32_ab(<2 x i32> %a, <2 x i32> %b, <2 x i32> inreg %c) {
-; VI-LABEL: or3_v2i32_ab:
-; VI:        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; VI-DAG:    v_or_b32_e32 v0, v0, v2
-; VI-DAG:    v_or_b32_e32 v1, v1, v3
-; VI-CHECK-NOT: {{.}}
-; VI-DAG:    v_or_b32_e32 v0, s16, v0
-; VI-DAG:    v_or_b32_e32 v1, s17, v1
+define amdgpu_ps <2 x i32> @v_or3_v2i32_ab(<2 x i32> %a, <2 x i32> %b, <2 x i32> inreg %c) {
+; VI-LABEL: v_or3_v2i32_ab:
+; VI:       ; %bb.0:
+; VI-NEXT:    v_or_b32_e32 v1, v1, v3
+; VI-NEXT:    v_or_b32_e32 v0, v0, v2
+; VI-NEXT:    v_or_b32_e32 v1, s3, v1
+; VI-NEXT:    v_or_b32_e32 v0, s2, v0
+; VI-NEXT:    v_readfirstlane_b32 s0, v0
+; VI-NEXT:    v_readfirstlane_b32 s1, v1
+; VI-NEXT:    ; return to shader part epilog
 ;
-; GFX9-LABEL: or3_v2i32_ab:
-; GFX9:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX9-DAG:     v_or3_b32 v0, v0, v2, s16
-; GFX9-DAG:     v_or3_b32 v1, v1, v3, s17
+; GFX9-LABEL: v_or3_v2i32_ab:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    v_or3_b32 v1, v1, v3, s3
+; GFX9-NEXT:    v_or3_b32 v0, v0, v2, s2
+; GFX9-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX9-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX9-NEXT:    ; return to shader part epilog
 ;
-; GFX10-LABEL: or3_v2i32_ab:
-; GFX10:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX10-DAG:     v_or3_b32 v0, v0, v2, s{{[0-9]+}}
-; GFX10-DAG:     v_or3_b32 v1, v1, v3, s{{[0-9]+}}
+; GFX10-LABEL: v_or3_v2i32_ab:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    v_or3_b32 v0, v0, v2, s2
+; GFX10-NEXT:    v_or3_b32 v1, v1, v3, s3
+; GFX10-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX10-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX10-NEXT:    ; return to shader part epilog
   %x = or <2 x i32> %a, %b
   %result = or <2 x i32> %x, %c
+  ret <2 x i32> %result
+}
+
+define amdgpu_ps <2 x i32> @v_or3_v2i32_const(<2 x i32> %a, <2 x i32> %b) {
+; VI-LABEL: v_or3_v2i32_const:
+; VI:       ; %bb.0:
+; VI-NEXT:    v_or_b32_e32 v1, v1, v3
+; VI-NEXT:    v_or_b32_e32 v0, v0, v2
+; VI-NEXT:    v_or_b32_e32 v1, 16, v1
+; VI-NEXT:    v_or_b32_e32 v0, 4, v0
+; VI-NEXT:    v_readfirstlane_b32 s0, v0
+; VI-NEXT:    v_readfirstlane_b32 s1, v1
+; VI-NEXT:    ; return to shader part epilog
+;
+; GFX9-LABEL: v_or3_v2i32_const:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    v_or3_b32 v1, v1, v3, 16
+; GFX9-NEXT:    v_or3_b32 v0, v0, v2, 4
+; GFX9-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX9-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX9-NEXT:    ; return to shader part epilog
+;
+; GFX10-LABEL: v_or3_v2i32_const:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    v_or3_b32 v0, v0, v2, 4
+; GFX10-NEXT:    v_or3_b32 v1, v1, v3, 16
+; GFX10-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX10-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX10-NEXT:    ; return to shader part epilog
+  %x = or <2 x i32> %a, <i32 4, i32 16>
+  %result = or <2 x i32> %x, %b
+  ret <2 x i32> %result
+}
+
+define amdgpu_ps <2 x i32> @v_or3_v2i32_inline_const(<2 x i32> %a, <2 x i32> %b) {
+; VI-LABEL: v_or3_v2i32_inline_const:
+; VI:       ; %bb.0:
+; VI-NEXT:    v_or_b32_e32 v1, v1, v3
+; VI-NEXT:    v_or_b32_e32 v0, v0, v2
+; VI-NEXT:    v_or_b32_e32 v1, 0x809, v1
+; VI-NEXT:    v_or_b32_e32 v0, 0x808, v0
+; VI-NEXT:    v_readfirstlane_b32 s0, v0
+; VI-NEXT:    v_readfirstlane_b32 s1, v1
+; VI-NEXT:    ; return to shader part epilog
+;
+; GFX9-LABEL: v_or3_v2i32_inline_const:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_movk_i32 s0, 0x809
+; GFX9-NEXT:    v_or3_b32 v1, v1, v3, s0
+; GFX9-NEXT:    s_movk_i32 s0, 0x808
+; GFX9-NEXT:    v_or3_b32 v0, v0, v2, s0
+; GFX9-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX9-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX9-NEXT:    ; return to shader part epilog
+;
+; GFX10-LABEL: v_or3_v2i32_inline_const:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    v_or3_b32 v0, v0, v2, 0x808
+; GFX10-NEXT:    v_or3_b32 v1, v1, v3, 0x809
+; GFX10-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX10-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX10-NEXT:    ; return to shader part epilog
+  %x = or <2 x i32> %a, <i32 2056, i32 2057>
+  %result = or <2 x i32> %x, %b
+  ret <2 x i32> %result
+}
+
+define amdgpu_ps <2 x i32> @v_or3_v2i32_multi_use(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c) {
+; VI-LABEL: v_or3_v2i32_multi_use:
+; VI:       ; %bb.0:
+; VI-NEXT:    v_or_b32_e32 v1, v1, v3
+; VI-NEXT:    v_or_b32_e32 v0, v0, v2
+; VI-NEXT:    v_or_b32_e32 v2, v1, v5
+; VI-NEXT:    v_or_b32_e32 v3, v0, v4
+; VI-NEXT:    v_add_u32_e32 v1, vcc, v1, v2
+; VI-NEXT:    v_add_u32_e32 v0, vcc, v0, v3
+; VI-NEXT:    v_readfirstlane_b32 s0, v0
+; VI-NEXT:    v_readfirstlane_b32 s1, v1
+; VI-NEXT:    ; return to shader part epilog
+;
+; GFX9-LABEL: v_or3_v2i32_multi_use:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    v_or_b32_e32 v1, v1, v3
+; GFX9-NEXT:    v_or_b32_e32 v0, v0, v2
+; GFX9-NEXT:    v_or_b32_e32 v2, v1, v5
+; GFX9-NEXT:    v_or_b32_e32 v3, v0, v4
+; GFX9-NEXT:    v_add_u32_e32 v1, v1, v2
+; GFX9-NEXT:    v_add_u32_e32 v0, v0, v3
+; GFX9-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX9-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX9-NEXT:    ; return to shader part epilog
+;
+; GFX10-LABEL: v_or3_v2i32_multi_use:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    v_or_b32_e32 v0, v0, v2
+; GFX10-NEXT:    v_or_b32_e32 v1, v1, v3
+; GFX10-NEXT:    v_or_b32_e32 v2, v0, v4
+; GFX10-NEXT:    v_or_b32_e32 v3, v1, v5
+; GFX10-NEXT:    v_add_nc_u32_e32 v0, v0, v2
+; GFX10-NEXT:    v_add_nc_u32_e32 v1, v1, v3
+; GFX10-NEXT:    v_readfirstlane_b32 s0, v0
+; GFX10-NEXT:    v_readfirstlane_b32 s1, v1
+; GFX10-NEXT:    ; return to shader part epilog
+  %x = or <2 x i32> %a, %b
+  %y = or <2 x i32> %x, %c
+  %result = add <2 x i32> %x, %y
   ret <2 x i32> %result
 }
 
@@ -199,95 +328,20 @@ define amdgpu_ps <2 x i32> @s_or3_v2i32(<2 x i32> inreg %a, <2 x i32> inreg %b, 
 ; VI:       ; %bb.0:
 ; VI-NEXT:    s_or_b64 s[0:1], s[2:3], s[4:5]
 ; VI-NEXT:    s_or_b64 s[0:1], s[0:1], s[6:7]
+; VI-NEXT:    ; return to shader part epilog
 ;
 ; GFX9-LABEL: s_or3_v2i32:
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_or_b64 s[0:1], s[2:3], s[4:5]
 ; GFX9-NEXT:    s_or_b64 s[0:1], s[0:1], s[6:7]
+; GFX9-NEXT:    ; return to shader part epilog
 ;
 ; GFX10-LABEL: s_or3_v2i32:
 ; GFX10:       ; %bb.0:
 ; GFX10-NEXT:    s_or_b64 s[0:1], s[2:3], s[4:5]
 ; GFX10-NEXT:    s_or_b64 s[0:1], s[0:1], s[6:7]
+; GFX10-NEXT:    ; return to shader part epilog
   %x = or <2 x i32> %a, %b
   %result = or <2 x i32> %x, %c
-  ret <2 x i32> %result
-}
-
-define <2 x i32> @or3_v2i32_const(<2 x i32> %a, <2 x i32> %b) {
-; VI-LABEL: or3_v2i32_const:
-; VI:        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; VI-DAG:    v_or_b32_e32 v0, 4, v0
-; VI-DAG:    v_or_b32_e32 v1, 16, v1
-; VI-CHECK-NOT: {{.}}
-; VI-DAG:    v_or_b32_e32 v0, v0, v2
-; VI-DAG:    v_or_b32_e32 v1, v1, v3
-;
-; GFX9-LABEL: or3_v2i32_const:
-; GFX9:        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX9-DAG:    v_or3_b32 v0, v0, v2, 4
-; GFX9-DAG:    v_or3_b32 v1, v1, v3, 16
-;
-; GFX10-LABEL: or3_v2i32_const:
-; GFX10:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX10-DAG:     v_or3_b32 v0, v0, v2, 4
-; GFX10-DAG:     v_or3_b32 v1, v1, v3, 16
-  %x = or <2 x i32> %a, <i32 4, i32 16>
-  %result = or <2 x i32> %x, %b
-  ret <2 x i32> %result
-}
-
-define <2 x i32> @or3_v2i32_inline_const(<2 x i32> %a, <2 x i32> %b) {
-; VI-LABEL: or3_v2i32_inline_const:
-; VI:        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; VI-DAG:    v_or_b32_e32 v0, 0x808, v0
-; VI-DAG:    v_or_b32_e32 v1, 0x809, v1
-; VI-CHECK-NOT: {{.}}
-; VI-DAG:    v_or_b32_e32 v0, v0, v2
-; VI-DAG:    v_or_b32_e32 v1, v1, v3
-;
-; GFX9-LABEL: or3_v2i32_inline_const:
-; GFX9:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX9-NEXT:    s_movk_i32 s4, 0x809
-; GFX9-NEXT:    v_or3_b32 v1, v1, v3, s4
-; GFX9-NEXT:    s_movk_i32 s4, 0x808
-; GFX9-NEXT:    v_or3_b32 v0, v0, v2, s4
-;
-; GFX10-LABEL: or3_v2i32_inline_const:
-; GFX10:         s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX10-DAG:     v_or3_b32 v0, v0, v2, 0x808
-; GFX10-DAG:     v_or3_b32 v1, v1, v3, 0x809
-  %x = or <2 x i32> %a, <i32 2056, i32 2057>
-  %result = or <2 x i32> %x, %b
-  ret <2 x i32> %result
-}
-
-define <2 x i32> @or3_v2i32_multi_use(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c) {
-; VI-LABEL: or3_v2i32_multi_use:
-; VI:        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; VI-DAG:    v_or_b32_e32 v0, v0, v2
-; VI-DAG:    v_or_b32_e32 v1, v1, v3
-; VI-CHECK-NOT: {{.}}
-; VI-DAG:    v_or_b32_e32 v3, v0, v4
-; VI-DAG:    v_or_b32_e32 v2, v1, v5
-;
-; GFX9-LABEL: or3_v2i32_multi_use:
-; GFX9:        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX9-DAG:    v_or_b32_e32 v0, v0, v2
-; GFX9-DAG:    v_or_b32_e32 v1, v1, v3
-; GFX9-CHECK-NOT: {{.}}
-; GFX9-DAG:    v_or_b32_e32 v{{[0-9]+}}, v0, v4
-; GFX9-DAG:    v_or_b32_e32 v{{[0-9]+}}, v1, v5
-;
-; GFX10-LABEL: or3_v2i32_multi_use:
-; GFX10:        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GFX10-DAG:    v_or_b32_e32 v0, v0, v2
-; GFX10-DAG:    v_or_b32_e32 v1, v1, v3
-; GFX10-CHECK-NOT: {{.}}
-; GFX10-DAG:    v_or_b32_e32 v{{[0-9]+}}, v0, v4
-; GFX10-DAG:    v_or_b32_e32 v{{[0-9]+}}, v1, v5
-  %x = or <2 x i32> %a, %b
-  %y = or <2 x i32> %x, %c
-  %result = add <2 x i32> %x, %y
   ret <2 x i32> %result
 }
