@@ -14947,7 +14947,7 @@ SDValue SITargetLowering::performOrCombine(SDNode *N,
       }
     }
   }
-  
+
   if (DCI.isAfterLegalizeDAG() && VT == MVT::v2i32) {
     if (SDValue RV = performAndOrXorv2i32Combine(N, DAG))
       return RV;
@@ -15047,7 +15047,7 @@ SDValue SITargetLowering::performXorCombine(SDNode *N,
       return DAG.getNode(ISD::BITCAST, DL, VT, NewSelect);
     }
   }
-  
+
   if (DCI.isAfterLegalizeDAG() && VT == MVT::v2i32) {
     if (SDValue RV = performAndOrXorv2i32Combine(N, DAG))
       return RV;
