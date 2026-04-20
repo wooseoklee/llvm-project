@@ -3031,7 +3031,8 @@ bool SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
         return false;
       }
 
-      bool NeedSaveSCC = RS->isRegUsed(AMDGPU::SCC) &&
+      bool NeedSaveSCC = (RS->isRegUsed(AMDGPU::SCC) ||
+                          MI->readsRegister(AMDGPU::SCC, /*TRI=*/nullptr)) &&
                          !MI->definesRegister(AMDGPU::SCC, /*TRI=*/nullptr);
 
       Register TmpSReg =
