@@ -4528,6 +4528,7 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
     }
 
     ActionList HIPAsmDeviceActions;
+    ActionList SaveTempsAsmActions;
 
     // Use the current host action in any of the offloading actions, if
     // required.
@@ -4592,8 +4593,9 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
       // Try to build the offloading actions and add the result as a dependency
       // to the host.
       if (UseNewOffloadingDriver)
-        Current = BuildOffloadingActions(C, Args, I, CUID, Current,
-                                         &HIPAsmDeviceActions);
+        Current =
+            BuildOffloadingActions(C, Args, I, CUID, Current,
+                                   &HIPAsmDeviceActions, &SaveTempsAsmActions);
       // Use the current host action in any of the offloading actions, if
       // required.
       else if (OffloadBuilder->addHostDependenceToDeviceActions(Current,
@@ -4604,19 +4606,25 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
         break;
     }
 
-    // HIP non-RDC -S (AMDGCN): bundle host and device assembly like the
-    // classic driver instead of embedding a fat binary in host asm.
-    if (Current && !HIPAsmDeviceActions.empty()) {
-      assert(UseNewOffloadingDriver && "unexpected HIP asm bundle list");
-      ActionList BundleInputs;
-      BundleInputs.append(HIPAsmDeviceActions);
-      BundleInputs.push_back(Current);
-      Current = C.MakeAction<OffloadBundlingJobAction>(BundleInputs);
-    }
+    if (Current) {
+      // HIP non-RDC -S (AMDGCN): bundle host and device assembly like the
+      // classic driver instead of embedding a fat binary in host asm.
+      if (!HIPAsmDeviceActions.empty()) {
+        assert(UseNewOffloadingDriver && "unexpected HIP asm bundle list");
+        ActionList BundleInputs;
+        BundleInputs.append(HIPAsmDeviceActions);
+        BundleInputs.push_back(Current);
+        Current = C.MakeAction<OffloadBundlingJobAction>(BundleInputs);
+      }
 
-    // If we ended with something, add to the output list.
-    if (Current)
+      // With -save-temps, add the extra .s-emitting backend actions BEFORE the
+      // main pipeline action.
+      for (Action *A : SaveTempsAsmActions)
+        Actions.push_back(A);
+
+      // If we ended with something, add to the output list.
       Actions.push_back(Current);
+    }
 
     // Add any top level actions generated for offloading.
     if (!UseNewOffloadingDriver)
@@ -4962,11 +4970,12 @@ Driver::getOffloadArchs(Compilation &C, const llvm::opt::DerivedArgList &Args,
   return Sorted;
 }
 
-Action *
-Driver::BuildOffloadingActions(Compilation &C, llvm::opt::DerivedArgList &Args,
-                               const InputTy &Input, StringRef CUID,
-                               Action *HostAction,
-                               ActionList *HIPAsmBundleDeviceOut) const {
+Action *Driver::BuildOffloadingActions(Compilation &C,
+                                       llvm::opt::DerivedArgList &Args,
+                                       const InputTy &Input, StringRef CUID,
+                                       Action *HostAction,
+                                       ActionList *HIPAsmBundleDeviceOut,
+                                       ActionList *SaveTempsAsmActions) const {
   // Don't build offloading actions if explicitly disabled or we do not have a
   // valid source input.
   if (offloadHostOnly() || !types::isSrcFile(Input.first))
@@ -5066,6 +5075,24 @@ Driver::BuildOffloadingActions(Compilation &C, llvm::opt::DerivedArgList &Args,
         A->propagateDeviceOffloadInfo(Kind, TCAndArch->second.data(),
                                       TCAndArch->first);
         A = ConstructPhaseAction(C, Args, Phase, A, Kind);
+
+        // With -save-temps, also emit a .s file for AMDGPU HIP device.
+        // The BackendJobAction takes the TY_LLVM_BC output as input and
+        // produces TY_PP_Asm (assembly).
+        if (Phase == phases::Backend && A->getType() == types::TY_LLVM_BC &&
+            SaveTempsAsmActions && isSaveTempsEnabled() &&
+            !Args.hasArg(options::OPT_emit_llvm) &&
+            TCAndArch->first->getTriple().isAMDGPU() &&
+            Kind == Action::OFK_HIP) {
+          auto *AsmAction = C.MakeAction<BackendJobAction>(A, types::TY_PP_Asm);
+          AsmAction->propagateDeviceOffloadInfo(Kind, TCAndArch->second.data(),
+                                                TCAndArch->first);
+          OffloadAction::DeviceDependences AsmDDep;
+          AsmDDep.add(*AsmAction, *TCAndArch->first, TCAndArch->second.data(),
+                      Kind);
+          SaveTempsAsmActions->push_back(
+              C.MakeAction<OffloadAction>(AsmDDep, types::TY_PP_Asm));
+        }
 
         if (isa<CompileJobAction>(A) && isa<CompileJobAction>(HostAction) &&
             Kind == Action::OFK_OpenMP &&

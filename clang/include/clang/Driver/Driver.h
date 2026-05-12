@@ -527,11 +527,15 @@ public:
   /// \param HIPAsmBundleDeviceOut - If non-null, HIP non-RDC \c -S (AMDGCN)
   /// device actions are appended here and \p HostAction is returned unchanged
   /// so the caller can emit a bundled \c .s via \c OffloadBundlingJobAction.
+  /// \param SaveTempsAsmActions - If non-null and \c -save-temps is enabled,
+  /// extra BackendJobActions emitting TY_PP_Asm (.s) are appended here for
+  /// AMDGPU HIP device.
   Action *
   BuildOffloadingActions(Compilation &C, llvm::opt::DerivedArgList &Args,
                          const InputTy &Input, StringRef CUID,
                          Action *HostAction,
-                         ActionList *HIPAsmBundleDeviceOut = nullptr) const;
+                         ActionList *HIPAsmBundleDeviceOut = nullptr,
+                         ActionList *SaveTempsAsmActions = nullptr) const;
 
   /// Returns the set of bound architectures active for this offload kind.
   /// If there are no bound architctures we return a set containing only the
