@@ -87,6 +87,7 @@
 ; RUN: cmp all/a.out.1 build/a.out.1 && rm -f build/a.out.1
 ; RUN: cmp all/a.out.2 build/a.out.2 && rm -f build/a.out.2
 ; RUN: mv build/*.5.precodegen* all2
+; RUN: mv build/*.s all2
 ; RUN: ls build | count 0
 
 ;; Check combinedindex

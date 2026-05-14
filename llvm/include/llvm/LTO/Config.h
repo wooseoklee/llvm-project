@@ -292,6 +292,12 @@ struct Config {
   LLVM_ABI Error addSaveTemps(std::string OutputFileName,
                               bool UseInputModulePath = false,
                               const DenseSet<StringRef> &SaveTempsArgs = {});
+
+  /// Output file name prefix used to generate per-task assembly sidecar files
+  /// named <prefix>.<task>.s. When non-empty, the codegen backend emits
+  /// assembly into an intermediate buffer instead of directly producing an
+  /// object file, then assembles it to the final object.
+  std::string SaveTempsPrefix;
 };
 
 struct LTOLLVMDiagnosticHandler : public DiagnosticHandler {

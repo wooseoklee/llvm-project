@@ -27,6 +27,15 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/LTO/LTO.h"
+#include "llvm/MC/MCAsmBackend.h"
+#include "llvm/MC/MCCodeEmitter.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCObjectFileInfo.h"
+#include "llvm/MC/MCObjectWriter.h"
+#include "llvm/MC/MCParser/MCAsmParser.h"
+#include "llvm/MC/MCParser/MCTargetAsmParser.h"
+#include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ModuleSymbolTable.h"
 #include "llvm/Passes/PassBuilder.h"
@@ -36,6 +45,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ThreadPool.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/VirtualFileSystem.h"
@@ -174,6 +184,7 @@ Error Config::addSaveTemps(std::string OutputFileName, bool UseInputModulePath,
     setHook("4.opt", PostOptModuleHook);
     setHook("5.precodegen", PreCodeGenModuleHook);
     CombinedIndexHook = SaveCombinedIndex;
+    SaveTempsPrefix = OutputFileName;
   } else {
     if (SaveTempsArgs.contains("preopt"))
       setHook("0.preopt", PreOptModuleHook);
@@ -185,8 +196,10 @@ Error Config::addSaveTemps(std::string OutputFileName, bool UseInputModulePath,
       setHook("3.import", PostImportModuleHook);
     if (SaveTempsArgs.contains("opt"))
       setHook("4.opt", PostOptModuleHook);
-    if (SaveTempsArgs.contains("precodegen"))
+    if (SaveTempsArgs.contains("precodegen")) {
       setHook("5.precodegen", PreCodeGenModuleHook);
+      SaveTempsPrefix = OutputFileName;
+    }
     if (SaveTempsArgs.contains("combinedindex"))
       CombinedIndexHook = SaveCombinedIndex;
   }
@@ -434,6 +447,76 @@ bool lto::opt(const Config &Conf, TargetMachine *TM, unsigned Task, Module &Mod,
   return !Conf.PostOptModuleHook || Conf.PostOptModuleHook(Task, Mod);
 }
 
+// Assembles the assembly text in AsmBuf into object code written to ObjOS,
+// then saves AsmBuf as a sidecar .s file. The .s filename is derived from
+// SaveTempsPrefix (set by addSaveTemps).
+static void assembleToObject(TargetMachine *TM,
+                             const SmallVectorImpl<char> &AsmBuf,
+                             raw_pwrite_stream &ObjOS,
+                             const std::string &SaveTempsPrefix, unsigned Task,
+                             const Module &Mod) {
+  const Target &T = TM->getTarget();
+  const MCRegisterInfo &MRI = TM->getMCRegisterInfo();
+  const MCAsmInfo &MAI = TM->getMCAsmInfo();
+  const MCInstrInfo *MII = TM->getMCInstrInfo();
+
+  // Build the union of the TM's base features and all per-function
+  // target-features attributes. Functions may override the module-level
+  // subtarget (e.g. "+mte" via a function attribute), and the MC assembler
+  // must be able to handle every instruction in the emitted assembly.
+  std::string AllFeatures = TM->getTargetFeatureString().str();
+  for (const Function &F : Mod) {
+    Attribute Attr = F.getFnAttribute("target-features");
+    if (Attr.isStringAttribute() && !Attr.getValueAsString().empty()) {
+      if (!AllFeatures.empty())
+        AllFeatures += ",";
+      AllFeatures += Attr.getValueAsString();
+    }
+  }
+  std::unique_ptr<MCSubtargetInfo> STIOwner(T.createMCSubtargetInfo(
+      TM->getTargetTriple(), TM->getTargetCPU(), AllFeatures));
+  const MCSubtargetInfo &STI = *STIOwner;
+
+  SourceMgr AsmSrcMgr;
+  AsmSrcMgr.AddNewSourceBuffer(
+      MemoryBuffer::getMemBufferCopy(StringRef(AsmBuf.data(), AsmBuf.size()),
+                                     "<lto-asm>"),
+      SMLoc());
+
+  MCContext AsmCtx(TM->getTargetTriple(), MAI, MRI, STI, &AsmSrcMgr);
+  // MCObjectFileInfo is required by MCELFStreamer::initSections (and
+  // equivalents on other object formats) when the parser starts.
+  std::unique_ptr<MCObjectFileInfo> AsmMOFI(
+      T.createMCObjectFileInfo(AsmCtx, TM->getRelocationModel() == Reloc::PIC_,
+                               TM->getCodeModel() == CodeModel::Large));
+  AsmCtx.setObjectFileInfo(AsmMOFI.get());
+
+  auto MAB = std::unique_ptr<MCAsmBackend>(
+      T.createMCAsmBackend(STI, MRI, TM->Options.MCOptions));
+  auto OW = std::unique_ptr<MCObjectWriter>(MAB->createObjectWriter(ObjOS));
+  auto CE = std::unique_ptr<MCCodeEmitter>(T.createMCCodeEmitter(*MII, AsmCtx));
+  std::unique_ptr<MCStreamer> ObjStreamer(
+      T.createMCObjectStreamer(TM->getTargetTriple(), AsmCtx, std::move(MAB),
+                               std::move(OW), std::move(CE), STI));
+
+  std::unique_ptr<MCAsmParser> Parser(
+      createMCAsmParser(AsmSrcMgr, AsmCtx, *ObjStreamer, MAI));
+  std::unique_ptr<MCTargetAsmParser> TAP(
+      T.createMCAsmParser(STI, *Parser, *MII));
+  if (!TAP)
+    report_fatal_error("Target does not support MC assembly parsing");
+  Parser->setTargetParser(*TAP);
+  if (Parser->Run(/*NoInitialTextSection=*/false))
+    report_fatal_error("Failed to assemble LTO output");
+
+  assert(!SaveTempsPrefix.empty());
+  std::string AsmPath = SaveTempsPrefix + std::to_string(Task) + ".s";
+  std::error_code EC;
+  raw_fd_ostream AsmFile(AsmPath, EC, sys::fs::OF_Text);
+  if (!EC)
+    AsmFile.write(AsmBuf.data(), AsmBuf.size());
+}
+
 static void codegen(const Config &Conf, TargetMachine *TM,
                     AddStreamFn AddStream, unsigned Task, Module &Mod,
                     const ModuleSummaryIndex &CombinedIndex) {
@@ -499,11 +582,33 @@ static void codegen(const Config &Conf, TargetMachine *TM,
           createImmutableModuleSummaryIndexWrapperPass(&CombinedIndex));
     if (Conf.PreCodeGenPassesHook)
       Conf.PreCodeGenPassesHook(CodeGenPasses);
-    if (TM->addPassesToEmitFile(CodeGenPasses, *Stream->OS,
-                                DwoOut ? &DwoOut->os() : nullptr,
-                                Conf.CGFileType))
+
+    // If CGFileType==ObjectFile and -save-temps, emit assembly into a buffer
+    // first, then assemble it to an object and save the .s sidecar. Otherwise,
+    // codegen directly to the target file type.
+    bool GenIntermediateAsmFile =
+        Conf.CGFileType == CodeGenFileType::ObjectFile &&
+        !Conf.SaveTempsPrefix.empty();
+
+    SmallVector<char, 0> AsmBuf;
+    std::unique_ptr<raw_svector_ostream> AsmBufOS;
+    if (GenIntermediateAsmFile)
+      AsmBufOS = std::make_unique<raw_svector_ostream>(AsmBuf);
+
+    if (TM->addPassesToEmitFile(
+            CodeGenPasses,
+            GenIntermediateAsmFile ? *AsmBufOS.get() : *Stream->OS,
+            DwoOut ? &DwoOut->os() : nullptr,
+            GenIntermediateAsmFile ? CodeGenFileType::AssemblyFile
+                                   : Conf.CGFileType))
       report_fatal_error("Failed to setup codegen");
     CodeGenPasses.run(Mod);
+
+    if (GenIntermediateAsmFile)
+      // AsmBuf is now fully populated. Assemble the .s into Stream->OS and save
+      // a sidecar .s file alongside it.
+      assembleToObject(TM, AsmBuf, *Stream->OS, Conf.SaveTempsPrefix, Task,
+                       Mod);
 
     if (DwoOut)
       DwoOut->keep();
