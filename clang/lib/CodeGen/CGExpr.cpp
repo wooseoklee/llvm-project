@@ -5176,6 +5176,15 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
                                     E->getIdx()->getType(), Idx, Accessed,
                                     /*FlexibleArray=*/false);
     }
+
+    // If the base pointer has struct-path TBAA (i.e., it is a specific struct
+    // member access at a fixed offset), but the subscript index is a runtime
+    // value, the resulting GEP may point to any member of the struct. Using the
+    // base member's TBAA tag would be incorrect and could cause alias analysis
+    // to claim NoAlias with other members at different offsets. Clear the
+    // struct-path TBAA in this case to be conservative.
+    if (EltTBAAInfo.BaseType && !E->getIdx()->isIntegerConstantExpr(getContext()))
+      EltTBAAInfo = TBAAAccessInfo::getMayAliasInfo();
   }
 
   LValue LV = MakeAddrLValue(Addr, E->getType(), EltBaseInfo, EltTBAAInfo);
