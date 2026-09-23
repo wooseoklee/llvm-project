@@ -1772,6 +1772,7 @@ void GCNHazardRecognizer::fixHazards(MachineInstr *MI) {
   fixWMMAHazards(MI); // fall-through if co-execution is enabled.
   fixWMMACoexecutionHazards(MI);
   fixShift64HighRegBug(MI);
+  fixPkF32OpSelBug(MI);
   fixVALUMaskWriteHazard(MI);
   fixRequiredExportPriority(MI);
   if (ST.requiresWaitIdleBeforeGetReg())
@@ -2902,6 +2903,131 @@ bool GCNHazardRecognizer::fixShift64HighRegBug(MachineInstr *MI) {
     Src1->setIsUndef();
   }
 
+  return true;
+}
+
+bool GCNHazardRecognizer::fixPkF32OpSelBug(MachineInstr *MI) {
+  if (!ST.hasPkF32OpSelBug())
+    return false;
+  switch (MI->getOpcode()) {
+  default:
+    return false;
+  case AMDGPU::V_PK_ADD_F32:
+  case AMDGPU::V_PK_MUL_F32:
+  case AMDGPU::V_PK_FMA_F32:
+    break;
+  }
+  const SIInstrInfo *TII = ST.getInstrInfo();
+  const MachineOperand *Src0Mods =
+      TII->getNamedOperand(*MI, AMDGPU::OpName::src0_modifiers);
+  const MachineOperand *Src0 = TII->getNamedOperand(*MI, AMDGPU::OpName::src0);
+  const MachineOperand *Src1Mods =
+      TII->getNamedOperand(*MI, AMDGPU::OpName::src1_modifiers);
+  const MachineOperand *Src1 = TII->getNamedOperand(*MI, AMDGPU::OpName::src1);
+  if (!Src0Mods || !Src0 || !Src1Mods || !Src1)
+    return false;
+
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  auto IsVGPR = [&](const MachineOperand *MO) {
+    return MO->isReg() && TRI.isVGPR(MRI, MO->getReg());
+  };
+  bool Src0IsVGPR = IsVGPR(Src0);
+  bool Src1IsVGPR = IsVGPR(Src1);
+
+  // For V_PK_ADD/MUL/FMA, check if opsel[1:0] == 2'b10, SRC0 = VGPR, SRC1 =
+  // VGPR. Then, swap src0 and src1 such that opsel[1:0] = 2'b01.
+  if (Src0IsVGPR && Src1IsVGPR) {
+    if ((Src0Mods->getImm() & SISrcMods::OP_SEL_0) ||
+        !(Src1Mods->getImm() & SISrcMods::OP_SEL_0))
+      return false;
+    if (!TII->commuteInstruction(*MI)) {
+      report_fatal_error(
+          "cannot apply the GFX950 v_pk_*_f32 op_sel workaround to: " +
+          Twine(TII->getName(MI->getOpcode())));
+    }
+    return true;
+  }
+
+  // For V_PK_FMA, check if {opsel[2], opsel[0]} == 2'b10, SRC0 = VGPR, SRC1 =
+  // Const/SGPR, SRC2 = VGPR, or {opsel[2], opsel[1]} == 2'b10, SRC0 =
+  // Const/SGPR, SRC1 = VGPR, SRC2 = VGPR. Then, decompose the packed FMA into
+  // two independent scalar v_fma_f32 instructions.
+  if (MI->getOpcode() != AMDGPU::V_PK_FMA_F32)
+    return false;
+
+  const MachineOperand *Src2Mods =
+      TII->getNamedOperand(*MI, AMDGPU::OpName::src2_modifiers);
+  const MachineOperand *Src2 = TII->getNamedOperand(*MI, AMDGPU::OpName::src2);
+  if (!Src2Mods || !Src2 || !IsVGPR(Src2))
+    return false;
+
+  bool Opsel2 = Src2Mods->getImm() & SISrcMods::OP_SEL_0;
+
+  bool Case2 = Src0IsVGPR && !Src1IsVGPR && Opsel2 &&
+               !(Src0Mods->getImm() & SISrcMods::OP_SEL_0);
+  bool Case3 = !Src0IsVGPR && Src1IsVGPR && Opsel2 &&
+               !(Src1Mods->getImm() & SISrcMods::OP_SEL_0);
+  if (!Case2 && !Case3)
+    return false;
+
+  // MI cannot simply be erased and replaced: the post-RA hazard recognizer's
+  // driver keeps using its MI pointer after this call returns (see
+  // PostRAHazardRecognizer::run and GCNHazardRecognizer::EmitInstruction), so
+  // erasing it here would leave that pointer dangling. Instead, following the
+  // same pattern used elsewhere for a MachineInstr whose job has been taken
+  // over by newly inserted instructions (c.f. SIFoldOperands::foldOperand),
+  // keep MI's slot in the block but reduce it to an IMPLICIT_DEF.
+  MachineOperand Dst = MI->getOperand(0);
+  const MachineOperand *ClampOp =
+      TII->getNamedOperand(*MI, AMDGPU::OpName::clamp);
+  int64_t Clamp = ClampOp ? ClampOp->getImm() : 0;
+
+  Register DstReg = Dst.getReg();
+  MachineBasicBlock *MBB = MI->getParent();
+  const DebugLoc &DL = MI->getDebugLoc();
+
+  auto AddLaneSrc = [&](MachineInstrBuilder &MIB, const MachineOperand &Mods,
+                        const MachineOperand &Src, unsigned NegBit,
+                        unsigned SelBit) {
+    int64_t ModsImm = Mods.getImm();
+    MIB.addImm((ModsImm & NegBit) ? (unsigned)SISrcMods::NEG : 0u);
+    if (Src.isReg()) {
+      // A VGPR source picks its lane-selected half; a broadcast SGPR/const
+      // source is only ever 32 bits wide (the low half of its declared
+      // 64-bit-class operand), regardless of lane or op_sel.
+      bool IsVGPRSrc = TRI.isVGPR(MRI, Src.getReg());
+      unsigned SubIdx = (IsVGPRSrc && (ModsImm & SelBit)) ? AMDGPU::sub1
+                                                           : AMDGPU::sub0;
+      // Physical-register operands must name a concrete sub-register, not
+      // carry a subreg index (that's only meaningful for virtual registers).
+      MIB.addReg(TRI.getSubReg(Src.getReg(), SubIdx), RegState::NoFlags);
+    } else {
+      MIB.add(Src);
+    }
+  };
+
+  auto EmitLane = [&](unsigned DstSubIdx, unsigned NegBit, unsigned SelBit) {
+    Register LaneDst = TRI.getSubReg(DstReg, DstSubIdx);
+    MachineInstrBuilder MIB =
+        BuildMI(*MBB, MI, DL, TII->get(AMDGPU::V_FMA_F32_e64), LaneDst);
+    AddLaneSrc(MIB, *Src0Mods, *Src0, NegBit, SelBit);
+    AddLaneSrc(MIB, *Src1Mods, *Src1, NegBit, SelBit);
+    AddLaneSrc(MIB, *Src2Mods, *Src2, NegBit, SelBit);
+    MIB.addImm(Clamp);
+    MIB.addImm(0); // omod: packed FMA has none.
+    runOnInstruction(MIB);
+  };
+
+  // Lane 0 (lo) uses OP_SEL_0/NEG; lane 1 (hi) uses OP_SEL_1/NEG_HI.
+  EmitLane(AMDGPU::sub0, SISrcMods::NEG, SISrcMods::OP_SEL_0);
+  EmitLane(AMDGPU::sub1, SISrcMods::NEG_HI, SISrcMods::OP_SEL_1);
+
+  // The original packed instruction's result has been fully recomputed above.
+  // Keep it around (do not erase, to avoid invalidating the caller's MI
+  // pointer/iterator) but strip it down to an IMPLICIT_DEF.
+  for (unsigned I = MI->getNumOperands() - 1; I > 0; --I)
+    MI->removeOperand(I);
+  MI->setDesc(TII->get(AMDGPU::IMPLICIT_DEF));
   return true;
 }
 
