@@ -100,6 +100,11 @@ private:
                              APInt &Inst, APInt &Scratch,
                              const MCSubtargetInfo &STI) const;
 
+  void getBinaryCodeForSwappedVPKOperands(const MCInst &MI,
+                                          SmallVectorImpl<MCFixup> &Fixups,
+                                          APInt &Encoding, APInt &Scratch,
+                                          const MCSubtargetInfo &STI) const;
+
   template <bool HasSrc0, bool HasSrc1, bool HasSrc2>
   APInt postEncodeVOP3(const MCInst &MI, APInt EncodedValue,
                        const MCSubtargetInfo &STI) const;
@@ -398,14 +403,52 @@ uint64_t AMDGPUMCCodeEmitter::getImplicitOpSelHiEncoding(int Opcode) const {
   return OP_SEL_HI_0 | OP_SEL_HI_1 | OP_SEL_HI_2;
 }
 
+void AMDGPUMCCodeEmitter::getBinaryCodeForSwappedVPKOperands(
+    const MCInst &MI, SmallVectorImpl<MCFixup> &Fixups, APInt &Encoding,
+    APInt &Scratch, const MCSubtargetInfo &STI) const {
+  int Src0ModIdx = AMDGPU::getNamedOperandIdx(MI.getOpcode(),
+                                              AMDGPU::OpName::src0_modifiers);
+  int Src0Idx =
+      AMDGPU::getNamedOperandIdx(MI.getOpcode(), AMDGPU::OpName::src0);
+  int Src1ModIdx = AMDGPU::getNamedOperandIdx(MI.getOpcode(),
+                                              AMDGPU::OpName::src1_modifiers);
+  int Src1Idx =
+      AMDGPU::getNamedOperandIdx(MI.getOpcode(), AMDGPU::OpName::src1);
+
+  if (Src0ModIdx < 0 || Src0Idx < 0 || Src1ModIdx < 0 || Src1Idx < 0) {
+    getBinaryCodeForInstr(MI, Fixups, Encoding, Scratch, STI);
+    return;
+  }
+
+  if ((MI.getOperand(Src0ModIdx).getImm() & SISrcMods::OP_SEL_0) ||
+      !(MI.getOperand(Src1ModIdx).getImm() & SISrcMods::OP_SEL_0)) {
+    getBinaryCodeForInstr(MI, Fixups, Encoding, Scratch, STI);
+    return;
+  }
+
+  MCInst NewMI = MI;
+  std::swap(NewMI.getOperand(Src0ModIdx), NewMI.getOperand(Src1ModIdx));
+  std::swap(NewMI.getOperand(Src0Idx), NewMI.getOperand(Src1Idx));
+  getBinaryCodeForInstr(NewMI, Fixups, Encoding, Scratch, STI);
+}
+
 void AMDGPUMCCodeEmitter::encodeInstruction(const MCInst &MI,
                                             SmallVectorImpl<char> &CB,
                                             SmallVectorImpl<MCFixup> &Fixups,
                                             const MCSubtargetInfo &STI) const {
   int Opcode = MI.getOpcode();
   APInt Encoding, Scratch;
-  getBinaryCodeForInstr(MI, Fixups, Encoding, Scratch,  STI);
-  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
+
+  // Swap src0 and src1 operand of gfx950 V_PK_ADD/MUL/FMA if op_sel is [0,1]
+  if ((Opcode == AMDGPU::V_PK_ADD_F32_vi || Opcode == AMDGPU::V_PK_MUL_F32_vi ||
+       Opcode == AMDGPU::V_PK_FMA_F32_vi) &&
+      STI.hasFeature(AMDGPU::FeatureGFX950Insts)) {
+    getBinaryCodeForSwappedVPKOperands(MI, Fixups, Encoding, Scratch, STI);
+  } else {
+    getBinaryCodeForInstr(MI, Fixups, Encoding, Scratch, STI);
+  }
+
+  const MCInstrDesc &Desc = MCII.get(Opcode);
   unsigned bytes = Desc.getSize();
 
   // Set unused op_sel_hi bits to 1 for VOP3P and MAI instructions.
