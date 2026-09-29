@@ -6768,6 +6768,94 @@ bool SIInstrInfo::isLegalSingleSGPRReadInstOperand(
   return !OpSel && !OpSelHi;
 }
 
+// Check if V_PK_FMA_F32 does not have the invalid opsel conditions.
+bool SIInstrInfo::isLegalPkFMAF32OpSel(const MachineInstr &MI) const {
+  if (!ST.hasPkF32InvalidOpSel() || MI.getOpcode() != AMDGPU::V_PK_FMA_F32)
+    return true;
+
+  const MachineOperand *Src1Mods =
+      getNamedOperand(MI, AMDGPU::OpName::src1_modifiers);
+  const MachineOperand *Src2Mods =
+      getNamedOperand(MI, AMDGPU::OpName::src2_modifiers);
+
+  auto HasOpSel0 = [](const MachineOperand *Mods) {
+    return Mods->getImm() & SISrcMods::OP_SEL_0;
+  };
+
+  // Illegal iff opsel[2:1] == 2'b01, 2'b10, or 2'b11, i.e. src1's or src2's
+  // own op_sel bit is set, regardless of src0's.
+  return !HasOpSel0(Src1Mods) && !HasOpSel0(Src2Mods);
+}
+
+void SIInstrInfo::decomposePkFMAF32(MachineInstr &MI,
+                                    MachineRegisterInfo &MRI) const {
+  assert(MI.getOpcode() == AMDGPU::V_PK_FMA_F32);
+
+  MachineBasicBlock &MBB = *MI.getParent();
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  MachineOperand &Src0 = *getNamedOperand(MI, AMDGPU::OpName::src0);
+  MachineOperand &Src1 = *getNamedOperand(MI, AMDGPU::OpName::src1);
+  MachineOperand &Src2 = *getNamedOperand(MI, AMDGPU::OpName::src2);
+  unsigned Mods0 =
+      getNamedOperand(MI, AMDGPU::OpName::src0_modifiers)->getImm();
+  unsigned Mods1 =
+      getNamedOperand(MI, AMDGPU::OpName::src1_modifiers)->getImm();
+  unsigned Mods2 =
+      getNamedOperand(MI, AMDGPU::OpName::src2_modifiers)->getImm();
+
+  // Extract the low or high lane of a packed VOP3P source operand.
+  auto ExtractLane = [&](MachineOperand &Op, bool UseSub1) -> MachineOperand {
+    unsigned SubIdx = (Op.isReg() && UseSub1) ? AMDGPU::sub1 : AMDGPU::sub0;
+    const TargetRegisterClass *RC =
+        Op.isReg() ? MRI.getRegClass(Op.getReg()) : nullptr;
+    const TargetRegisterClass *SubRC = !Op.isReg() ? nullptr
+                                       : RI.isVGPR(MRI, Op.getReg())
+                                           ? RI.getVGPRClassForBitWidth(32)
+                                           : RI.getSGPRClassForBitWidth(32);
+    return buildExtractSubRegOrImm(MI, MRI, Op, RC, SubIdx, SubRC);
+  };
+
+  // neg_lo/neg_hi on the packed operand become a plain NEG modifier on the
+  // low-lane/high-lane scalar instruction respectively.
+  auto LaneMods = [](unsigned Mods, bool Hi) -> unsigned {
+    if (Hi)
+      return (Mods & SISrcMods::NEG_HI) ? static_cast<unsigned>(SISrcMods::NEG)
+                                        : 0u;
+    return Mods & SISrcMods::NEG;
+  };
+
+  auto BuildLane = [&](Register Dst, bool Hi) {
+    BuildMI(MBB, MI, DL, get(AMDGPU::V_FMA_F32_e64), Dst)
+        .addImm(LaneMods(Mods0, Hi))
+        .add(ExtractLane(Src0, Hi ? (Mods0 & SISrcMods::OP_SEL_1)
+                                  : (Mods0 & SISrcMods::OP_SEL_0)))
+        .addImm(LaneMods(Mods1, Hi))
+        .add(ExtractLane(Src1, Hi ? (Mods1 & SISrcMods::OP_SEL_1)
+                                  : (Mods1 & SISrcMods::OP_SEL_0)))
+        .addImm(LaneMods(Mods2, Hi))
+        .add(ExtractLane(Src2, Hi ? (Mods2 & SISrcMods::OP_SEL_1)
+                                  : (Mods2 & SISrcMods::OP_SEL_0)))
+        .addImm(0)  // clamp
+        .addImm(0); // omod
+  };
+
+  const TargetRegisterClass *VGPR32 = RI.getVGPRClassForBitWidth(32);
+  Register Lo = MRI.createVirtualRegister(VGPR32);
+  Register Hi = MRI.createVirtualRegister(VGPR32);
+  BuildLane(Lo, false);
+  BuildLane(Hi, true);
+
+  Register Dst = getNamedOperand(MI, AMDGPU::OpName::vdst)->getReg();
+  BuildMI(MBB, MI, DL, get(AMDGPU::REG_SEQUENCE), Dst)
+      .addReg(Lo)
+      .addImm(AMDGPU::sub0)
+      .addReg(Hi)
+      .addImm(AMDGPU::sub1);
+
+  MI.eraseFromParent();
+}
+
 bool SIInstrInfo::isOperandLegal(const MachineInstr &MI, unsigned OpIdx,
                                  const MachineOperand *MO) const {
   const MachineFunction &MF = *MI.getMF();
@@ -7160,6 +7248,13 @@ void SIInstrInfo::legalizeOperandsVOP3(MachineRegisterInfo &MRI,
       if (!isLegalSingleSGPRReadInstOperand(MRI, MI, /*SrcN=*/I))
         legalizeOpWithMove(MI, VOP3Idx[I]);
     }
+  }
+
+  // Fix GFX950 v_pk_fma_f32 invalid op_sel by decomposing.
+  if (ST.hasPkF32InvalidOpSel() && Opc == AMDGPU::V_PK_FMA_F32 &&
+      !isLegalPkFMAF32OpSel(MI)) {
+    decomposePkFMAF32(MI, MRI);
+    return;
   }
 }
 

@@ -5038,6 +5038,28 @@ bool AMDGPUAsmParser::validateOpSel(const MCInst &Inst) {
       return false;
   }
 
+  // gfx950 v_pk_add/mul/fma_f32 have several invalid op_sel encodings
+  if (getFeatureBits()[AMDGPU::FeatureGFX950Insts] &&
+      (Opc == AMDGPU::V_PK_ADD_F32_vi || Opc == AMDGPU::V_PK_MUL_F32_vi ||
+       Opc == AMDGPU::V_PK_FMA_F32_vi)) {
+    int OpSelIdx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::op_sel);
+    unsigned OpSel = Inst.getOperand(OpSelIdx).getImm();
+
+    if (Opc == AMDGPU::V_PK_FMA_F32_vi) {
+      bool Src1OpSel = (OpSel >> 1) & 1;
+      bool Src2OpSel = (OpSel >> 2) & 1;
+
+      // op_sel[2:1] == 2'b01, 2'b10, or 2'b11: src1's or src2's own op_sel
+      // bit is set, regardless of src0's.
+      if (Src1OpSel || Src2OpSel)
+        return false;
+    } else {
+      // op_sel[1:0] == 2'b10 for v_pk_add/mul_f32.
+      if ((OpSel & 3) == 2)
+        return false;
+    }
+  }
+
   // Packed math FP32 instructions typically accept SGPRs or VGPRs as source
   // operands. On gfx12+, if a source operand uses SGPRs, the HW can only read
   // the first SGPR and use it for both the low and high operations.
