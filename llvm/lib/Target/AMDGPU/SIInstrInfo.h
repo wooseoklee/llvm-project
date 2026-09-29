@@ -1560,6 +1560,14 @@ public:
                                    const MachineInstr &MI, unsigned SrcN,
                                    const MachineOperand *MO = nullptr) const;
 
+  /// Check if \p MI has legal GFX950 v_pk_fma op_sel.
+  bool isLegalPkFMAF32OpSel(const MachineInstr &MI) const;
+
+  /// Fix a GFX950 v_pk_fma_f32 with invalid op_sel. If opsel[2:0] == 3'b010,
+  /// swap src0 and src1 in place; otherwise decompose it into two independent
+  /// scalar V_FMA_F32_e64 instructions, replacing \p MI.
+  void fixPkFMAF32(MachineInstr &MI, MachineRegisterInfo &MRI) const;
+
   /// Legalize operands in \p MI by either commuting it or inserting a
   /// copy of src1.
   void legalizeOperandsVOP2(MachineRegisterInfo &MRI, MachineInstr &MI) const;
