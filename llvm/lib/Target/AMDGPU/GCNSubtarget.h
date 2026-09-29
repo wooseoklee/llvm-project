@@ -622,6 +622,8 @@ public:
     return getGeneration() == GFX11;
   }
 
+  bool hasPkF32InvalidOpSel() const { return HasGFX950Insts; }
+
   bool hasCvtScaleForwardingHazard() const { return HasGFX950Insts; }
 
   bool hasPermlaneForwardingHazard() const { return HasGFX950Insts; }
