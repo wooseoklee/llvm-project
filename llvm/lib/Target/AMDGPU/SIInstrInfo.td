@@ -1774,6 +1774,8 @@ def VOP3NoMods : ComplexPattern<untyped, 1, "SelectVOP3NoMods">;
 def VOP3OMods : ComplexPattern<untyped, 3, "SelectVOP3OMods">;
 
 def VOP3PMods  : ComplexPattern<untyped, 2, "SelectVOP3PMods">;
+def VOP3PModsPkOpSel0 :
+    ComplexPattern<untyped, 2, "SelectVOP3PModsPkOpSel0">;
 
 def VOP3PModsDOT  : ComplexPattern<untyped, 2, "SelectVOP3PModsDOT">;
 def VOP3PNoModsDOT  : ComplexPattern<untyped, 1, "SelectVOP3PNoModsDOT">;
